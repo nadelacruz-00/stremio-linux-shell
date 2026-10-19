@@ -21,7 +21,7 @@ use libmpv2::{
 use rust_i18n::t;
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
 use serde_json::{Number, Value};
-use tracing::error;
+use tracing::{error, info};
 
 pub type GLContext = Rc<Display>;
 
@@ -183,6 +183,16 @@ pub struct Player {
     render_context: Option<RenderContext>,
     sender: Sender<PlayerEvent>,
     receiver: Receiver<PlayerEvent>,
+    force_vaapi: bool,
+}
+
+fn normalize_hwdec(value: String, force_vaapi: bool) -> String {
+    if force_vaapi && value.starts_with("auto") {
+        info!("Overriding MPV hwdec={value} with hwdec=vaapi for Intel GPU");
+        "vaapi".to_owned()
+    } else {
+        value
+    }
 }
 
 impl Player {
@@ -252,6 +262,7 @@ impl Player {
             }
         }
         let mpv = mpv.expect("Failed to create mpv after multiple attempts — is libmpv installed?");
+        let force_vaapi = crate::gpu::detect_gpu_vendor() == crate::gpu::GpuVendor::Intel;
 
         let event_context = EventContext::new(mpv.ctx);
         event_context
@@ -266,6 +277,7 @@ impl Player {
             render_context: None,
             sender,
             receiver,
+            force_vaapi,
         }
     }
 
@@ -379,10 +391,16 @@ impl Player {
                 }
             }
             name if STRING_PROPERTIES.contains(&name) => {
-                if let Ok(MpvPropertyValue::String(value)) = property.value()
-                    && let Err(e) = self.mpv.set_property(name, value)
-                {
-                    error!("Failed to set property {name}: {e}");
+                if let Ok(MpvPropertyValue::String(value)) = property.value() {
+                    let value = if name == "hwdec" {
+                        normalize_hwdec(value, self.force_vaapi)
+                    } else {
+                        value
+                    };
+
+                    if let Err(e) = self.mpv.set_property(name, value) {
+                        error!("Failed to set property {name}: {e}");
+                    }
                 }
             }
             name => error!("Failed to set property {name}: Unsupported"),
@@ -425,5 +443,17 @@ mod tests {
             property.value(),
             Ok(MpvPropertyValue::Bool(false))
         ));
+    }
+
+    #[test]
+    fn forces_automatic_hwdec_to_vaapi_on_intel() {
+        assert_eq!(normalize_hwdec("auto-copy".to_owned(), true), "vaapi");
+        assert_eq!(normalize_hwdec("auto-safe".to_owned(), true), "vaapi");
+    }
+
+    #[test]
+    fn preserves_hwdec_setting_on_non_intel() {
+        assert_eq!(normalize_hwdec("auto-copy".to_owned(), false), "auto-copy");
+        assert_eq!(normalize_hwdec("no".to_owned(), true), "no");
     }
 }
