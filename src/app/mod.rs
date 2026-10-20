@@ -28,7 +28,7 @@ use winit::{
     event_loop::ActiveEventLoop,
     keyboard::ModifiersState,
     platform::wayland::WindowAttributesExtWayland,
-    raw_window_handle::{HasDisplayHandle, HasWindowHandle},
+    raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle},
     window::{
         CursorIcon, Fullscreen, Icon as WindowIcon, UserAttentionType, Window, WindowAttributes,
     },
@@ -40,7 +40,7 @@ use crate::{
     constants::{APP_ID, APP_NAME, WINDOW_SIZE},
     shared::{
         self,
-        types::{Cursor, MouseState, UserEvent, WindowSize},
+        types::{Cursor, MouseState, NativeDisplay, UserEvent, WindowSize},
     },
 };
 
@@ -55,7 +55,7 @@ const WINDOW_ICON: &[u8] = include_bytes!(concat!(
 #[derive(Debug)]
 pub enum AppEvent {
     Init,
-    Ready,
+    Ready(Option<NativeDisplay>),
     Resized(WindowSize),
     Focused(bool),
     Visibility(bool),
@@ -186,7 +186,18 @@ impl App {
             shared::create_renderer((width as i32, height as i32), refresh_rate);
         });
 
-        self.sender.send(AppEvent::Ready).ok();
+        let native_display = self.window.as_ref().and_then(|window| {
+            window.display_handle().ok().and_then(|handle| match handle.as_raw() {
+                RawDisplayHandle::Xlib(display) => display
+                    .display
+                    .map(|display| NativeDisplay::X11(display.as_ptr() as usize)),
+                RawDisplayHandle::Wayland(display) => {
+                    Some(NativeDisplay::Wayland(display.display.as_ptr() as usize))
+                }
+                _ => None,
+            })
+        });
+        self.sender.send(AppEvent::Ready(native_display)).ok();
     }
 
     fn validate_window_config(

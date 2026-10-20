@@ -4,6 +4,7 @@ mod constants;
 use std::{env, ffi::CString, os::raw::c_void, rc::Rc, thread, time::Duration};
 
 use crate::config::PlayerConfig;
+use crate::shared::types::NativeDisplay;
 use config::MpvConfig;
 use constants::{
     BOOL_PROPERTIES, FLOAT_PROPERTIES, INT_PROPERTIES, NODE_PROPERTIES, STRING_PROPERTIES,
@@ -268,6 +269,9 @@ impl Player {
         event_context
             .disable_deprecated_events()
             .expect("Failed to disable deprecated events");
+        if let Err(e) = event_context.observe_property("hwdec-current", Format::String, 1) {
+            error!("Failed to observe active hardware decoder: {e}");
+        }
 
         let (sender, receiver) = unbounded::<PlayerEvent>();
 
@@ -281,7 +285,7 @@ impl Player {
         }
     }
 
-    pub fn setup(&mut self, context: GLContext) {
+    pub fn setup(&mut self, context: GLContext, native_display: Option<NativeDisplay>) {
         self.render_context.take();
 
         fn get_proc_address(context: &GLContext, name: &str) -> *mut c_void {
@@ -291,17 +295,29 @@ impl Player {
 
         let mpv_handle = unsafe { self.mpv.ctx.as_mut() };
 
+        let mut render_params = vec![
+            RenderParam::ApiType(RenderParamApiType::OpenGl),
+            RenderParam::InitParams(OpenGLInitParams {
+                get_proc_address,
+                ctx: context,
+            }),
+            RenderParam::BlockForTargetTime(false),
+        ];
+
+        if let Some(native_display) = native_display {
+            match native_display {
+                NativeDisplay::X11(display) => {
+                    render_params.push(RenderParam::X11Display(display as *const c_void));
+                }
+                NativeDisplay::Wayland(display) => {
+                    render_params.push(RenderParam::WaylandDisplay(display as *const c_void));
+                }
+            }
+        }
+
         let mut render_context = RenderContext::new(
             mpv_handle,
-            vec![
-                RenderParam::ApiType(RenderParamApiType::OpenGl),
-                RenderParam::InitParams(OpenGLInitParams {
-                    get_proc_address,
-                    ctx: context,
-                }),
-                RenderParam::BlockForTargetTime(false),
-                // RenderParam::AdvancedControl(true),
-            ],
+            render_params,
         )
         .expect("Failed to create render context");
 

@@ -22,6 +22,12 @@ pub struct MouseDelta(pub i32, pub i32);
 pub struct WindowSize(pub i32, pub i32);
 
 #[derive(Debug, Clone, Copy)]
+pub enum NativeDisplay {
+    X11(usize),
+    Wayland(usize),
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct MouseState {
     pub button: MouseButton,
     pub pressed: bool,

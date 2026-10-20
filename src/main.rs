@@ -281,9 +281,9 @@ fn main() -> ExitCode {
             AppEvent::Init => {
                 webview.start();
             }
-            AppEvent::Ready => {
+            AppEvent::Ready(native_display) => {
                 shared::with_gl(|surface, _| {
-                    player.setup(Rc::new(surface.display()));
+                    player.setup(Rc::new(surface.display()), native_display);
                 });
             }
             AppEvent::Resized(size) => {
@@ -610,6 +610,10 @@ fn main() -> ExitCode {
                 needs_redraw = true;
             }
             PlayerEvent::PropertyChange(property) => {
+                if property.name() == "hwdec-current" {
+                    println!("🎞️ [PLAYER] Active hardware decoder: {:?}", property.1);
+                }
+
                 let should_forward = if property.name() == "demuxer-cache-time" {
                     let cache_second = property
                         .1
