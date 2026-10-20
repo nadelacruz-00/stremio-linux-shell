@@ -45,7 +45,10 @@ pub struct CefPlatform {
 
 #[derive(Deserialize, Serialize, Default, Debug)]
 pub struct CefIndex {
+    #[serde(default)]
     pub linux64: CefPlatform,
+    #[serde(default)]
+    pub linuxarm64: CefPlatform,
 }
 
 fn main() -> Result<()> {
@@ -100,8 +103,13 @@ fn get_archive_name(cef_version: String) -> Result<String> {
         .into_body()
         .read_json::<CefIndex>()?;
 
-    let version = index
-        .linux64
+    let platform = match std::env::var("CARGO_CFG_TARGET_ARCH")?.as_str() {
+        "x86_64" => &index.linux64,
+        "aarch64" => &index.linuxarm64,
+        arch => return Err(Error::msg(format!("Unsupported target arch: {arch}"))),
+    };
+
+    let version = platform
         .versions
         .iter()
         .find(|version| version.cef_version.starts_with(&cef_version))
